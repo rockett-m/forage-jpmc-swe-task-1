@@ -1,0 +1,184 @@
+From 7f11494a703ff18f880ba1c643b015f8e2384ce4 Mon Sep 17 00:00:00 2001
+From: Morgan Rockett <morgan.rockett@tufts.edu>
+Date: Mon, 16 Sep 2024 18:39:06 -0400
+Subject: [PATCH] fix: got client3.py working and added unit tests
+
+---
+ client3.py     | 59 ++++++++++++++++++++++++++++++++++++++++----------
+ client_test.py | 52 ++++++++++++++++++++++++++++++++++++++++++--
+ 2 files changed, 98 insertions(+), 13 deletions(-)
+
+diff --git a/client3.py b/client3.py
+index 3fc09b7..67c4d7d 100644
+--- a/client3.py
++++ b/client3.py
+@@ -21,7 +21,7 @@
+ import json
+ import random
+ import urllib.request
+-
++import sys
+ # Server API URLs
+ QUERY = "http://localhost:8080/query?id={}"
+ 
+@@ -29,31 +29,68 @@ QUERY = "http://localhost:8080/query?id={}"
+ N = 500
+ 
+ 
+-def getDataPoint(quote):
+-    """ Produce all the needed values to generate a datapoint """
+-    """ ------------- Update this function ------------- """
++def getDataPoint(quote: str) -> tuple:
++    """ Produce all the needed values to generate a datapoint
++    price = avg(bid_price, ask_price)
++    input:
++        quote: dict
++    returns:
++        tuple: (stock, bid_price, ask_price, price)
++    ------------- Update this function ------------- """
++
+     stock = quote['stock']
++    """
++    # would expect in real market behavior
++    # if no quantity of bids or asks, set the price to 0.0
++    bid_price = max(float(quote['top_bid']['price']), 0.0)
++    ask_price = max(float(quote['top_ask']['price']), 0.0)
++    # would expect in real market behavior
++    bid_price = min(bid_price, ask_price)
++    """
+     bid_price = float(quote['top_bid']['price'])
+     ask_price = float(quote['top_ask']['price'])
+-    price = bid_price
++
++    price = (bid_price + ask_price) / 2
++    """ 2 points past decimal place
++    return (stock,
++            float(f"{bid_price:.2f}"),
++            float(f"{ask_price:.2f}"),
++            float(f"{price:.2f}"))
++    """
+     return stock, bid_price, ask_price, price
+ 
++def getRatio(price_a: float, price_b: float) -> float:
++    """ Get ratio of price_a and price_b
++    input:
++        price_a, price_b: float, float
++    returns:
++        price_b <= 0.0 then 1e9 to avoid div by 0 error
++        else: price_a / price_b
++    ------------- Update this function ------------- """
++    if price_b <= 0.0:
++        return 1e9
+ 
+-def getRatio(price_a, price_b):
+-    """ Get ratio of price_a and price_b """
+-    """ ------------- Update this function ------------- """
+-    return 1
++    # 2 places past decimal
++    # ratio = float(f"{(price_a / price_b):.2f}")
++    ratio = price_a / price_b
+ 
++    # print(f"{price_a = }, {price_b = }, {ratio = }")
++    return ratio
+ 
+ # Main
+ if __name__ == "__main__":
+     # Query the price once every N seconds.
+     for _ in iter(range(N)):
+-        quotes = json.loads(urllib.request.urlopen(QUERY.format(random.random())).read())
++        quote = None
++        try:
++            quotes = json.loads(urllib.request.urlopen(QUERY.format(random.random())).read())
++        except Exception as e:
++            print(f"Error fetching data: {e = }")
++            continue
+ 
+         """ ----------- Update to get the ratio --------------- """
+         for quote in quotes:
+             stock, bid_price, ask_price, price = getDataPoint(quote)
+             print("Quoted %s at (bid:%s, ask:%s, price:%s)" % (stock, bid_price, ask_price, price))
+ 
+-        print("Ratio %s" % getRatio(price, price))
++        print("Ratio %s" % getRatio(bid_price, ask_price))
+diff --git a/client_test.py b/client_test.py
+index af2bf26..133a6c9 100644
+--- a/client_test.py
++++ b/client_test.py
+@@ -1,5 +1,6 @@
+ import unittest
+-from client3 import getDataPoint
++from client3 import getDataPoint, getRatio
++
+ 
+ class ClientTest(unittest.TestCase):
+   def test_getDataPoint_calculatePrice(self):
+@@ -8,6 +9,10 @@ class ClientTest(unittest.TestCase):
+       {'top_ask': {'price': 121.68, 'size': 4}, 'timestamp': '2019-02-11 22:06:30.572453', 'top_bid': {'price': 117.87, 'size': 81}, 'id': '0.109974697771', 'stock': 'DEF'}
+     ]
+     """ ------------ Add the assertion below ------------ """
++    for quote in quotes:
++      stock, bid_price, ask_price, _ = getDataPoint(quote)
++      price_expected = (bid_price + ask_price) / 2
++      self.assertEqual(getDataPoint(quote), (stock, bid_price, ask_price, price_expected))
+ 
+   def test_getDataPoint_calculatePriceBidGreaterThanAsk(self):
+     quotes = [
+@@ -15,11 +20,54 @@ class ClientTest(unittest.TestCase):
+       {'top_ask': {'price': 121.68, 'size': 4}, 'timestamp': '2019-02-11 22:06:30.572453', 'top_bid': {'price': 117.87, 'size': 81}, 'id': '0.109974697771', 'stock': 'DEF'}
+     ]
+     """ ------------ Add the assertion below ------------ """
+-
++    # take the ask if bid > ask (in a real scenario)
++    # since expect bid to fill at ask price
++    # min(quote['top_bid']['price'], quote['top_ask']['price']),
++    for quote in quotes:
++      stock, bid_price, ask_price, _ = getDataPoint(quote)
++      price_expected = (bid_price + ask_price) / 2
++      self.assertEqual(getDataPoint(quote), (stock, bid_price, ask_price, price_expected))
+ 
+   """ ------------ Add more unit tests ------------ """
++  def test_getRatio_divByZeroError(self):
++    quotes = [
++      # no issue
++      {'top_ask': {'price': 10.03, 'size': 10}, 'timestamp': '2019-02-11 22:06:30.572453',
++       'top_bid': {'price': 10.01, 'size': 10}, 'id': '0.109974697771', 'stock': 'ABC'},
++      # denom div by zero error
++      {'top_ask': {'price': 0.0, 'size': 10}, 'timestamp': '2019-02-11 22:06:30.572453',
++       'top_bid': {'price': 10.01, 'size': 10}, 'id': '0.109974697771', 'stock': 'DEF'},
++      # denom div by zero error, both == 0.0
++      {'top_ask': {'price': 0.0, 'size': 10}, 'timestamp': '2019-02-11 22:06:30.572453',
++       'top_bid': {'price': 0.0, 'size': 10}, 'id': '0.109974697771', 'stock': 'GHI'}
++    ]
+ 
++    for quote in quotes:
++      _, bid_price, ask_price, _ = getDataPoint(quote)
++      ratio_expected = 0.0
++      if ask_price == 0.0:
++        ratio_expected = 1e9
++      else:
++        ratio_expected = bid_price / ask_price
++
++      self.assertEqual(getRatio(bid_price, ask_price), ratio_expected)
++
++  """ Future work if needed
++  def test_getRatio_quantityZeroError(self):
++    quotes = [
++      # normal
++      {'top_ask': {'price': 120.48, 'size': 36}, 'timestamp': '2019-02-11 22:06:30.572453',
++       'top_bid': {'price': 119.2, 'size': 109}, 'id': '0.109974697771', 'stock': 'ABC'},
++      # no bids
++      {'top_ask': {'price': 120.48, 'size': 36}, 'timestamp': '2019-02-11 22:06:30.572453',
++       'top_bid': {'price': 119.2, 'size': 0}, 'id': '0.109974697771', 'stock': 'ABC'},
++      # no asks
++      {'top_ask': {'price': 120.48, 'size': 0}, 'timestamp': '2019-02-11 22:06:30.572453',
++       'top_bid': {'price': 119.2, 'size': 109}, 'id': '0.109974697771', 'stock': 'ABC'},
++    ]
+ 
++    self.assertEqual(getRatio(bid_price, ask_price), ratio_expected)
++    """
+ 
+ if __name__ == '__main__':
+     unittest.main()
+-- 
+2.43.0
+
